@@ -273,3 +273,25 @@ config-docs: ## Generate configuration documentation from toml files.
 .PHONY: help
 help: ## Display help messages.
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-30s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
+
+##@ Lite Build
+
+.PHONY: build-lite
+build-lite: ## Build GreptimeDB Lite version (optimized for embedded systems).
+	@echo "Building GreptimeDB Lite version..."
+	cargo build --release --features=lite
+	@echo ""
+	@echo "Build complete!"
+	@echo "Binary location: target/release/greptime"
+	@echo "Binary size:"
+	@ls -lh target/release/greptime | awk '{print "  " $$5}'
+	@echo ""
+	@echo "Run with: ./target/release/greptime standalone start --config-file config/standalone-lite.toml"
+
+.PHONY: docker-lite
+docker-lite: ## Build GreptimeDB Lite Docker image.
+	docker build -f Dockerfile.lite -t greptimedb-lite:latest .
+	@echo ""
+	@echo "Docker image built: greptimedb-lite:latest"
+	@echo "Run with: docker-compose -f docker-compose.lite.yml up"
+

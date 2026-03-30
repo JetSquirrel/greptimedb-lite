@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  greptimedb-lite:
+    build:
+      context: .
+      dockerfile: Dockerfile.lite
+    container_name: greptimedb-lite
+    ports:
+      - "4000:4000"  # HTTP
+      - "4001:4001"  # gRPC
+      - "4002:4002"  # MySQL
+      - "4003:4003"  # PostgreSQL
+    volumes:
+      - greptimedb-data:/tmp/greptimedb
+      - ./config/standalone-lite.toml:/etc/greptimedb/config.toml:ro
+    environment:
+      - RUST_LOG=info
+    restart: unless-stopped
+    # Resource limits for embedded/constrained environments
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 128M
+
+volumes:
+  greptimedb-data:
+    driver: local
