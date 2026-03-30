@@ -1,0 +1,125 @@
+# GreptimeDB Lite Configuration
+# Optimized for embedded systems and single-machine deployments
+#
+# This configuration minimizes resource usage by:
+# - Reducing memory allocation
+# - Limiting concurrent workers
+# - Disabling unnecessary features
+# - Using minimal buffer sizes
+
+mode = "standalone"
+
+[http]
+addr = "127.0.0.1:4000"
+# Reduced timeout for embedded systems
+timeout = "10s"
+
+[grpc]
+addr = "127.0.0.1:4001"
+runtime_size = 2  # Minimal runtime for embedded systems
+
+[mysql]
+addr = "127.0.0.1:4002"
+runtime_size = 1  # Minimal runtime
+
+[postgres]
+addr = "127.0.0.1:4003"
+runtime_size = 1  # Minimal runtime
+
+[opentsdb]
+enable = false  # Disable to reduce memory footprint
+
+[influxdb]
+enable = false  # Disable to reduce memory footprint
+
+[prom_store]
+enable = true  # Keep Prometheus support for metrics
+with_metric_engine = true
+
+[storage]
+# Use local data directory
+data_home = "/tmp/greptimedb"
+type = "File"  # Local file storage only
+
+## Mito engine options
+[storage.compaction]
+# Reduce compaction resources for embedded systems
+max_inflight_tasks = 2
+max_files_in_level0 = 4
+max_purge_tasks = 8
+
+[storage.manifest]
+checkpoint_margin = 5
+gc_duration = "10m"
+compress = true
+
+[storage.flush]
+max_flush_tasks = 2
+region_write_buffer_size = "8MB"  # Reduced from default 32MB
+picker_schedule_interval = "10m"
+auto_flush_interval = "30m"
+
+## WAL options
+[wal]
+provider = "raft_engine"  # Local only, no Kafka
+dir = "/tmp/greptimedb/wal"
+file_size = "64MB"  # Smaller files for embedded systems
+purge_threshold = "1GB"
+purge_interval = "10m"
+read_batch_size = 64
+sync_write = false  # Async for better performance
+
+## Logging configuration
+[logging]
+level = "info"
+dir = "/tmp/greptimedb/logs"
+# Disable append mode to reduce overhead
+append_mode = false
+
+## Metadata storage
+[metadata_store]
+# Use embedded RaftEngine for metadata (no external services required)
+file_size = "64MB"
+purge_threshold = "512MB"
+
+## Region engine options
+[region_engine]
+# Minimal workers for embedded systems
+[region_engine.mito]
+num_workers = 2  # Reduced from default 8
+worker_channel_size = 64
+worker_request_batch_size = 16
+manifest_checkpoint_distance = 5
+compress_manifest = true
+max_background_jobs = 2  # Reduced from default 4
+auto_flush_interval = "30m"
+global_write_buffer_size = "32MB"  # Reduced from default 1GB
+global_write_buffer_reject_size = "64MB"  # Reduced from default 2GB
+sst_meta_cache_size = "8MB"  # Reduced from default 128MB
+vector_cache_size = "32MB"  # Reduced from default 512MB
+page_cache_size = "64MB"  # Reduced from default 512MB
+sst_write_buffer_size = "1MB"  # Reduced from default 8MB
+scan_parallelism = 0  # Auto-detect based on CPU cores
+parallel_scan_channel_size = 16
+allow_stale_entries = false
+
+# Disable fulltext index to reduce memory usage
+enable_experimental_write_cache = false
+experimental_write_cache_path = ""
+experimental_write_cache_size = "0"
+experimental_write_cache_ttl = "0"
+
+# Disable flow engine for minimal deployment
+[mode_config.standalone.flow]
+enable = false
+
+## Export metrics configuration
+[export_metrics]
+# Disabled by default for minimal overhead
+enable = false
+write_interval = "30s"
+
+## Tracing configuration
+[tracing]
+# Minimal tracing for embedded systems
+# Set RUST_LOG environment variable to control log levels if needed

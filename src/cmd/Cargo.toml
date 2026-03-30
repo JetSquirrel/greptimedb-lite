@@ -10,7 +10,9 @@ name = "greptime"
 path = "src/bin/greptime.rs"
 
 [features]
-default = [
+default = []
+lite = []
+full = [
     "servers/pprof",
     "servers/mem-prof",
     "meta-srv/pg_kvbackend",
