@@ -1,0 +1,62 @@
+# Dockerfile for GreptimeDB Lite
+# Optimized for minimal size and resource usage
+
+FROM rust:1-slim-bookworm as builder
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    protobuf-compiler \
+    pkg-config \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+
+# Copy the source code
+COPY . .
+
+# Build the lite version
+RUN cargo build --release --features=lite
+
+# Runtime stage - use minimal base image
+FROM debian:bookworm-slim
+
+# Install runtime dependencies only
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create greptime user and group
+RUN groupadd -r greptime && useradd -r -g greptime greptime
+
+# Create data directories
+RUN mkdir -p /tmp/greptimedb/logs /tmp/greptimedb/wal && \
+    chown -R greptime:greptime /tmp/greptimedb
+
+# Copy the binary from builder
+COPY --from=builder /build/target/release/greptime /usr/local/bin/greptime
+
+# Copy the lite configuration
+COPY config/standalone-lite.toml /etc/greptimedb/config.toml
+
+# Set user
+USER greptime
+
+# Expose ports
+# 4000: HTTP
+# 4001: gRPC
+# 4002: MySQL
+# 4003: PostgreSQL
+EXPOSE 4000 4001 4002 4003
+
+# Set working directory
+WORKDIR /tmp/greptimedb
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD ["/usr/local/bin/greptime", "cli", "health", "--http-addr", "127.0.0.1:4000"]
+
+# Run the lite version with optimized config
+ENTRYPOINT ["/usr/local/bin/greptime"]
+CMD ["standalone", "start", "--config-file", "/etc/greptimedb/config.toml"]
