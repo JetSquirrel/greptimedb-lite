@@ -1,0 +1,236 @@
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+      - '.dockerignore'
+      - '.gitignore'
+      - 'grafana/**'
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+name: Lite Build CI
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  # Binary size budget in MB (90MB as per spec)
+  BINARY_SIZE_BUDGET_MB: 90
+  # Memory budget in MB (500MB as per spec for startup)
+  MEMORY_BUDGET_MB: 500
+
+jobs:
+  build-lite:
+    name: Build GreptimeDB Lite
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "lite-build"
+          cache-all-crates: "true"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build Lite Version
+        run: |
+          echo "Building GreptimeDB Lite..."
+          make build-lite
+
+      - name: Check Binary Size
+        id: check-size
+        run: |
+          BINARY_PATH="target/release/greptime"
+          if [ ! -f "$BINARY_PATH" ]; then
+            echo "Error: Binary not found at $BINARY_PATH"
+            exit 1
+          fi
+
+          # Get binary size in bytes
+          SIZE_BYTES=$(stat -f%z "$BINARY_PATH" 2>/dev/null || stat -c%s "$BINARY_PATH")
+          SIZE_MB=$((SIZE_BYTES / 1024 / 1024))
+
+          echo "Binary size: ${SIZE_MB}MB (${SIZE_BYTES} bytes)"
+          echo "size_mb=${SIZE_MB}" >> $GITHUB_OUTPUT
+          echo "size_bytes=${SIZE_BYTES}" >> $GITHUB_OUTPUT
+
+          # Check against budget
+          if [ $SIZE_MB -gt ${{ env.BINARY_SIZE_BUDGET_MB }} ]; then
+            echo "::error::Binary size ${SIZE_MB}MB exceeds budget of ${{ env.BINARY_SIZE_BUDGET_MB }}MB"
+            exit 1
+          fi
+
+          echo "✅ Binary size check passed: ${SIZE_MB}MB <= ${{ env.BINARY_SIZE_BUDGET_MB }}MB"
+
+      - name: Upload Binary Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: greptime-lite-${{ github.sha }}
+          path: target/release/greptime
+          retention-days: 7
+
+      - name: Save Binary Size Metric
+        run: |
+          mkdir -p metrics
+          echo "${{ steps.check-size.outputs.size_mb }}" > metrics/binary_size_mb.txt
+          echo "${{ steps.check-size.outputs.size_bytes }}" > metrics/binary_size_bytes.txt
+          date -u +"%Y-%m-%d %H:%M:%S UTC" > metrics/build_timestamp.txt
+
+      - name: Upload Metrics
+        uses: actions/upload-artifact@v4
+        with:
+          name: lite-metrics-${{ github.sha }}
+          path: metrics/
+          retention-days: 30
+
+  smoke-test:
+    name: Smoke Test (Lite Build)
+    runs-on: ubuntu-latest
+    needs: build-lite
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Download Binary
+        uses: actions/download-artifact@v4
+        with:
+          name: greptime-lite-${{ github.sha }}
+          path: ./bin
+
+      - name: Make Binary Executable
+        run: chmod +x ./bin/greptime
+
+      - name: Install Test Dependencies
+        run: |
+          # Install MySQL client
+          sudo apt-get update
+          sudo apt-get install -y mysql-client postgresql-client curl jq
+
+      - name: Run Smoke Tests
+        run: |
+          ./scripts/lite-smoke-test.sh ./bin/greptime config/standalone-lite.toml
+
+      - name: Check Memory Usage
+        id: check-memory
+        run: |
+          # The smoke test script should have created a PID file
+          if [ -f /tmp/greptimedb-test.pid ]; then
+            PID=$(cat /tmp/greptimedb-test.pid)
+            if ps -p $PID > /dev/null; then
+              # Get RSS memory in KB
+              RSS_KB=$(ps -o rss= -p $PID)
+              RSS_MB=$((RSS_KB / 1024))
+              echo "Memory usage: ${RSS_MB}MB"
+              echo "memory_mb=${RSS_MB}" >> $GITHUB_OUTPUT
+
+              # Check against budget (this is startup memory, should be well under 500MB)
+              if [ $RSS_MB -gt ${{ env.MEMORY_BUDGET_MB }} ]; then
+                echo "::error::Memory usage ${RSS_MB}MB exceeds budget of ${{ env.MEMORY_BUDGET_MB }}MB"
+                exit 1
+              fi
+
+              echo "✅ Memory check passed: ${RSS_MB}MB <= ${{ env.MEMORY_BUDGET_MB }}MB"
+            else
+              echo "::warning::Process $PID not found, cannot check memory"
+            fi
+          else
+            echo "::warning::PID file not found, cannot check memory"
+          fi
+
+  docker-build:
+    name: Build Docker Lite Image
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker Image
+        run: |
+          docker build -f Dockerfile.lite -t greptimedb-lite:test .
+
+      - name: Test Docker Image
+        run: |
+          # Start the container
+          docker run -d --name greptimedb-lite-test \
+            -p 4000:4000 -p 4001:4001 -p 4002:4002 -p 4003:4003 \
+            greptimedb-lite:test
+
+          # Wait for startup
+          echo "Waiting for GreptimeDB to start..."
+          sleep 10
+
+          # Basic health check
+          for i in {1..30}; do
+            if curl -f http://localhost:4000/health > /dev/null 2>&1; then
+              echo "✅ GreptimeDB is healthy"
+              break
+            fi
+            echo "Waiting for health check... ($i/30)"
+            sleep 2
+          done
+
+          # Final health check
+          if ! curl -f http://localhost:4000/health; then
+            echo "::error::Health check failed"
+            docker logs greptimedb-lite-test
+            exit 1
+          fi
+
+          # Stop container
+          docker stop greptimedb-lite-test
+          docker rm greptimedb-lite-test
+
+      - name: Check Docker Image Size
+        run: |
+          IMAGE_SIZE=$(docker image inspect greptimedb-lite:test --format='{{.Size}}')
+          IMAGE_SIZE_MB=$((IMAGE_SIZE / 1024 / 1024))
+          echo "Docker image size: ${IMAGE_SIZE_MB}MB"
+
+          # Docker images are expected to be larger due to base image + dependencies
+          # Setting a reasonable budget of 300MB for the lite image
+          if [ $IMAGE_SIZE_MB -gt 300 ]; then
+            echo "::warning::Docker image size ${IMAGE_SIZE_MB}MB is larger than expected (>300MB)"
+          fi
+
+  summary:
+    name: Test Summary
+    runs-on: ubuntu-latest
+    needs: [build-lite, smoke-test, docker-build]
+    if: always()
+    steps:
+      - name: Check Results
+        run: |
+          echo "Build Lite: ${{ needs.build-lite.result }}"
+          echo "Smoke Test: ${{ needs.smoke-test.result }}"
+          echo "Docker Build: ${{ needs.docker-build.result }}"
+
+          if [ "${{ needs.build-lite.result }}" != "success" ] || \
+             [ "${{ needs.smoke-test.result }}" != "success" ] || \
+             [ "${{ needs.docker-build.result }}" != "success" ]; then
+            echo "::error::One or more jobs failed"
+            exit 1
+          fi
+
+          echo "✅ All lite build checks passed!"

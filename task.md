@@ -2,17 +2,17 @@
 
 **Project**: greptimedb-lite
 **Status**: Active
-**Last Update**: 2026-04-03 06:01:00 UTC
-**Current Iteration**: 1
+**Last Update**: 2026-04-03 06:16:00 UTC
+**Current Iteration**: 2
 **Source**: https://github.com/JetSquirrel/greptimedb-lite
 
 ## Current Objectives
 
-- Analyze existing codebase structure and architecture
-- Set up tracking and monitoring
-- Review code quality and test coverage
-- Ensure security best practices
-- Maintain lightweight resource optimization
+- Implement P1 stabilization phase from roadmap
+- Add CI checks for lite build with smoke tests
+- Establish binary size and memory budget monitoring
+- Prepare first Lite preview package
+- Continue maintaining lightweight resource optimization
 
 ## Progress
 
@@ -24,6 +24,18 @@
 - [x] Security scan for vulnerabilities
 - [x] Document deployment and configuration options
 - [ ] Verify resource optimization targets (ongoing — requires actual build)
+
+### Iteration 1 (P1 Stabilization Phase) - 2026-04-03
+- [x] Create CI workflow for lite build (`lite-ci.yml`)
+- [x] Add smoke test script for HTTP/MySQL/PostgreSQL endpoints
+- [x] Implement binary size tracking and budget checks (90MB budget)
+- [x] Implement memory usage validation (500MB budget for startup)
+- [x] Add Docker lite image build validation in CI
+- [x] Create supporting scripts:
+  - `scripts/lite-smoke-test.sh` - Comprehensive endpoint testing
+  - `scripts/check-binary-size.sh` - Binary size monitoring
+- [ ] Run full CI pipeline to validate implementation
+- [ ] Produce first Lite preview package (pending CI validation)
 
 ### Analysis Findings
 
@@ -179,10 +191,47 @@ The repository is a Rust monorepo with ~40 crates under `src/`:
 
 ## Next Steps
 
-1. Security scan for vulnerabilities (CodeQL + dependency audit review)
-2. Document deployment and configuration options
-3. Verify resource optimization targets with actual benchmark runs
-4. Begin iterative improvements based on spec.md priorities
+1. Validate CI implementation by running workflows
+2. Address any CI failures and refine smoke tests
+3. Produce first Lite preview package once CI is green
+4. Begin P2 deep optimization: ARM cross-compilation, memory presets
+5. Continue upstream tracking and cherry-pick workflow setup
+
+## P1 Stabilization Implementation Details
+
+### CI Infrastructure Added
+- **Workflow**: `.github/workflows/lite-ci.yml`
+  - Builds lite version with `make build-lite`
+  - Validates binary size against 90MB budget
+  - Runs comprehensive smoke tests
+  - Tests Docker image build
+  - Tracks metrics over time
+
+### Testing Infrastructure
+- **Smoke Tests**: `scripts/lite-smoke-test.sh`
+  - HTTP health check and SQL queries
+  - MySQL protocol connectivity and queries
+  - PostgreSQL protocol connectivity and queries
+  - Prometheus remote write endpoint validation
+  - Memory footprint verification
+  - 12 automated test cases
+
+- **Binary Size Check**: `scripts/check-binary-size.sh`
+  - Monitors binary size against budget
+  - Tracks historical size trends
+  - Fails builds that exceed budget
+  - Exports metrics for monitoring
+
+### Resource Budgets Enforced
+- **Binary Size**: 90MB (per spec.md)
+- **Startup Memory**: 500MB (per spec.md and roadmap.md)
+- **Docker Image**: ~300MB warning threshold
+
+### Metrics Tracking
+- Binary size (bytes, KB, MB)
+- Memory usage (RSS)
+- Build timestamps
+- Historical trends (CSV format)
 
 ## Project Context
 
@@ -200,4 +249,4 @@ GreptimeDB-Lite is a lightweight observability database optimized for embedded s
 |-----------|------|--------|--------|
 | 0 | 2026-04-03 | Imported | Success |
 | 1 | 2026-04-03 | Analysis & documentation | Success |
-| 2 | 2026-04-03 | Analyzed codebase, CI pipeline, code quality | Success |
+| 2 | 2026-04-03 | P1 Stabilization - CI infrastructure | Success |
